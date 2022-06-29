@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+  <title>Wheel Of Fortune</title>
+  <script src="../lib/enable3d/enable3d.framework.0.25.2.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+
+</head>
+
+<body class="overflow-hidden">
+  <div class="absolute left-0 right-0 mx-auto justify-center text-center text-white top-14">
+    <p class="font-bold">Use WASD, SPACE and your Mouse.</p>
+    Try to play it on your mobile device :)
+  </div>
+  <script>
+    const {
+      Project,
+      PhysicsLoader,
+      Scene3D,
+      ExtendedObject3D,
+      THREE,
+      JoyStick,
+      ThirdPersonControls,
+      PointerLock,
+      PointerDrag
+    } = ENABLE3D
+
+    /**
+     * Is touch device?
+     */
+    const isTouchDevice = 'ontouchstart' in window
+
+    class MainScene extends Scene3D {
+      constructor() {
+        super('MainScene')
+      }
+
+      init() {
+        this.renderer.setPixelRatio(Math.max(1, window.devicePixelRatio / 2))
+
+        this.canJump = true
+        this.move = false
+
+        this.moveTop = 0
+        this.moveRight = 0
+      }
+
+      async preload() {
+        /**
+          * wheelOfFortune.glb by vitalspace
+          * https://github.com/vitalspaace
+          * MIT license 2022
+        */
+        await this.load.preload('wheelOfFortune', '../assets/glb/wheeloffortune.glb')
+        /**
+          * box_man.glb by Jan Bláha
+          * https://github.com/swift502/Sketchbook
+          * CC-0 license 2018
+        */
+        await this.load.preload('man', '../assets/glb/box_man.glb')
+
+      }
+
+      async create() {
+        const { lights } = await this.warpSpeed('-ground', '-orbitControls')
+
+        const { hemisphereLight, ambientLight, directionalLight } = lights
+        const intensity = 0.65
+        hemisphereLight.intensity = intensity
+        ambientLight.intensity = intensity
+        directionalLight.intensity = intensity
+
+        // this.physics.debug.enable()
+
+        // let i = 2
+
+        // const changeMode = () => {
+        //   let mode = i % 3 === 0 ? 1 + 2048 : i % 3 === 1 ? 1 + 4096 : 1 + 2048 + 4096
+        //   this.physics.debug.mode(mode)
+        //   i++
+        // }
+        // changeMode()
+
+        // setInterval(changeMode, 4000)
+
+        const addMan = async () => {
+          const object = await this.load.gltf('man')
+          const man = object.scene.children[0]
+
+          this.man = new ExtendedObject3D()
+          this.man.name = 'man'
+          this.man.rotateY(Math.PI + 0.1) // a hack
+          this.man.add(man)
+          this.man.rotation.set(0, Math.PI * 1.5, 0)
+          this.man.position.set(10, 2, 0)
+          // add shadow
+          this.man.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = child.receiveShadow = false
+              // https://discourse.threejs.org/t/cant-export-material-from-blender-gltf/12258
+              child.material.roughness = 1
+              child.material.metalness = 0
+            }
+          })
+
+          /**
+           * Animations
+           */
+          this.animationMixers.add(this.man.animation.mixer)
+          object.animations.forEach(animation => {
+            if (animation.name) {
+              this.man.animation.add(animation.name, animation)
+            }
+          })
+          this.man.animation.play('idle')
+
+          /**
+           * Add the player to the scene with a body
+           */
+          this.add.existing(this.man)
+          this.physics.add.existing(this.man, {
+            shape: 'sphere',
+            radius: 0.25,
+            width: 0.5,
+            offset: { y: -0.25 }
+          })
+          this.man.body.setFriction(0.8)
+          this.man.body.setAngularFactor(0, 0, 0)
+
+          // https://docs.panda3d.org/1.10/python/programming/physics/bullet/ccd
+          this.man.body.setCcdMotionThreshold(1e-7)
+          this.man.body.setCcdSweptSphereRadius(0.25)
+
+          /**
+           * Add 3rd Person Controls
+           */
+          this.controls = new ThirdPersonControls(this.camera, this.man, {
+            offset: new THREE.Vector3(0, 1, 0),
+            targetRadius: 3
+          })
+          // set initial view to 90 deg theta
+          this.controls.theta = 90
+
+          /**
+           * Add Pointer Lock and Pointer Drag
+           */
+          if (!isTouchDevice) {
+            let pl = new PointerLock(this.canvas)
+            let pd = new PointerDrag(this.canvas)
+            pd.onMove(delta => {
+              if (pl.isLocked()) {
+                this.controls.update(delta.x * 2, delta.y * 2)
+              }
+            })
+          }
+        }
+
+        const wheel = async () => {
+          const object = await this.load.gltf('wheelOfFortune');
+          const scene = object.scenes[0];
+          const wheelFortune = new ExtendedObject3D();
+
+          wheelFortune.name = 'wheel';
+          wheelFortune.add(scene);
+          this.add.existing(wheelFortune);
+
+          wheelFortune.traverse(child => {
+
+            // Add physics to others objects
+
+            if (child.isMesh && child.name === "plane" || child.name === "landders" || child.name === "bases") {
+              this.physics.add.existing(child, {
+                shape: 'concave',
+                mass: 0,
+                collisionFlags: 1,
+                autoCenter: false
+              })
+            }
+
+            // getMesh
+
+            if (child.name === "wheels") {
+              this.wheels = child;
+            }
+
+            if (child.name === "chair") {
+              this.chair = child;
+            }
+
+          })
+
+          let wheels;
+          let chairs;
+
+          // Add pysics to wheels
+          wheels = this.physics.add.existing(this.wheels, {
+            shape: 'concave',
+            mass: 100,
+            collisionFlags: 2,
+          });
+
+          wheels = this.wheels;
+
+          // chairs positions
+          const chairsPositions = [
+            { x: 0, y: 2.5, z: 0 },
+            { x: 0, y: 10.40, z: -0.06 },
+            { x: 0, y: 3.67038, z: -2.81689 },
+            { x: 0, y: 9.2, z: -2.81 },
+            { x: 0, y: 3.65, z: 2.80 },
+            { x: 0, y: 9.3, z: 2.80 },
+            { x: 0, y: 6.50052, z: -4.00356 },
+          ]
+
+          // Generate chairs, add pyhsics, add to scene and add costraints to wheels
+          for (let i = 0; i < chairsPositions.length; i++) {
+            this.chairs = this.chair.clone();
+            this.chairs.position.set(chairsPositions[i].x, chairsPositions[i].y, chairsPositions[i].z);
+            this.physics.add.existing(this.chairs, {
+              shape: 'concave',
+            });
+            this.physics.add.constraints.dof(wheels.body, this.chairs.body)
+            this.scene.add(this.chairs);
+          }
+
+          // Add pyshics to chair and add costraints to wheels
+          chairs = this.physics.add.existing(this.chair, {
+            shape: 'concave',
+            autoCenter: false
+          });
+          chairs = this.chair;
+
+          this.physics.add.constraints.dof(wheels.body, chairs.body)
+
+          // rotate wheels
+          this.rotateWheel = wheels
+
+        }
+
+        await addMan()
+        await wheel();
+
+        /**
+         * Add Keys
+         */
+        this.keys = {
+          w: { isDown: false },
+          a: { isDown: false },
+          s: { isDown: false },
+          d: { isDown: false },
+          space: { isDown: false }
+        }
+
+        const press = (e, isDown) => {
+          e.preventDefault()
+          const { keyCode } = e
+          switch (keyCode) {
+            case 87: // w
+              this.keys.w.isDown = isDown
+              break
+            case 38: // arrow up
+              this.keys.w.isDown = isDown
+              break
+            case 32: // space
+              this.keys.space.isDown = isDown
+              break
+          }
+        }
+
+        document.addEventListener('keydown', e => press(e, true))
+        document.addEventListener('keyup', e => press(e, false))
+
+        /**
+         * Add joystick
+         */
+        if (isTouchDevice) {
+          const joystick = new JoyStick()
+          const axis = joystick.add.axis({
+            styles: { left: 35, bottom: 35, size: 100 }
+          })
+          axis.onMove(event => {
+            /**
+             * Update Camera
+             */
+            const { top, right } = event
+            this.moveTop = top * 3
+            this.moveRight = right * 3
+          })
+          const buttonA = joystick.add.button({
+            letter: 'A',
+            styles: { right: 35, bottom: 110, size: 80 }
+          })
+          buttonA.onClick(() => this.jump())
+          const buttonB = joystick.add.button({
+            letter: 'B',
+            styles: { right: 110, bottom: 35, size: 80 }
+          })
+          buttonB.onClick(() => (this.move = true))
+          buttonB.onRelease(() => (this.move = false))
+        }
+
+        setTimeout(() => {
+          const placeholder = document.getElementById('welcome-game-placeholder')
+          if (placeholder) placeholder.remove()
+        }, 500)
+      }
+
+      jump() {
+        if (!this.man || !this.canJump) return
+        this.canJump = false
+        this.man.animation.play('jump_running', 500, false)
+        setTimeout(() => {
+          this.canJump = true
+          this.man.animation.play('idle')
+        }, 650)
+        this.man.body.applyForceY(6)
+      }
+
+      update(time, delta) {
+        if (this.man && this.man.body) {
+
+          this.rotateWheel.rotation.x += 0.01
+          this.rotateWheel.body.needUpdate = true
+
+          /**
+           * Update Controls
+           */
+          this.controls.update(this.moveRight * 2, -this.moveTop * 2)
+          /**
+           * Player Turn
+           */
+          const speed = 4
+          const v3 = new THREE.Vector3()
+
+          const rotation = this.camera.getWorldDirection(v3)
+          const theta = Math.atan2(rotation.x, rotation.z)
+          const rotationMan = this.man.getWorldDirection(v3)
+          const thetaMan = Math.atan2(rotationMan.x, rotationMan.z)
+          this.man.body.setAngularVelocityY(0)
+
+          const l = Math.abs(theta - thetaMan)
+          let rotationSpeed = isTouchDevice ? 2 : 4
+          let d = Math.PI / 24
+
+          if (l > d) {
+            if (l > Math.PI - d) rotationSpeed *= -1
+            if (theta < thetaMan) rotationSpeed *= -1
+            this.man.body.setAngularVelocityY(rotationSpeed)
+          }
+
+          /**
+           * Player Move
+           */
+          if (this.keys.w.isDown || this.move) {
+            if (this.man.animation.current === 'idle' && this.canJump) this.man.animation.play('run')
+
+            const x = Math.sin(theta) * speed,
+              y = this.man.body.velocity.y,
+              z = Math.cos(theta) * speed
+
+            this.man.body.setVelocity(x, y, z)
+          } else {
+            if (this.man.animation.current === 'run' && this.canJump) this.man.animation.play('idle')
+          }
+
+          /**
+           * Player Jump
+           */
+          if (this.keys.space.isDown && this.canJump) {
+            this.jump()
+          }
+        }
+      }
+    }
+
+    window.addEventListener('load', () => {
+      PhysicsLoader('../lib/ammo/kripken', () => {
+        const project = new Project({
+          antialias: false,
+          maxSubSteps: 10,
+          fixedTimeStep: 1 / 120,
+          scenes: [MainScene]
+        })
+      })
+    })
+  </script>
+</body>
+
+</html>
